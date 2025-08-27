@@ -11,7 +11,6 @@ interface DesignAssistantContentProps {
     showOnlyMissingWeight: boolean;
     onToggleMissingWeight: () => void;
     filteredDocuments: any[];
-    breakdownMap: Map<string, any[]>;
     expandedParts: Set<string>;
     onToggleExpanded: (itemId: string) => void;
     parts: any[];
@@ -26,7 +25,6 @@ interface DesignAssistantContentProps {
     onSearchChange: (value: string) => void;
     vendorFilter: string;
     onVendorFilterChange: (vendor: string) => void;
-    documentId?: string; // Add documentId for part status loading
 }
 
 export function DesignAssistantContent({
@@ -38,7 +36,6 @@ export function DesignAssistantContent({
     showOnlyMissingWeight,
     onToggleMissingWeight,
     filteredDocuments,
-    breakdownMap,
     expandedParts,
     onToggleExpanded,
     parts,
@@ -52,8 +49,7 @@ export function DesignAssistantContent({
     searchTerm,
     onSearchChange,
     vendorFilter,
-    onVendorFilterChange,
-    documentId
+    onVendorFilterChange
 }: DesignAssistantContentProps) {
     return (
         <>
@@ -69,7 +65,6 @@ export function DesignAssistantContent({
 
             <DesignAssistantPartsList
                 filteredDocuments={filteredDocuments}
-                breakdownMap={breakdownMap}
                 expandedParts={expandedParts}
                 onToggleExpanded={onToggleExpanded}
                 showOnlyMissingWeight={showOnlyMissingWeight}
@@ -82,7 +77,6 @@ export function DesignAssistantContent({
                 onSearchChange={onSearchChange}
                 vendorFilter={vendorFilter}
                 onVendorFilterChange={onVendorFilterChange}
-                documentId={documentId}
             />
 
             <DesignAssistantDebug

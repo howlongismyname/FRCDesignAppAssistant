@@ -4,7 +4,6 @@ import { getCotsCategory, isCotsPart } from "../../services/cots-service";
 
 interface DesignAssistantPartsListProps {
     filteredDocuments: any[];
-    breakdownMap: Map<string, any[]>;
     expandedParts: Set<string>;
     onToggleExpanded: (itemId: string) => void;
     showOnlyMissingWeight: boolean;
@@ -133,6 +132,8 @@ function NestedSubassemblyItem({
                     partNumber={item.partNumber}
                     cotsCategory={item.document?.elementId ? getCotsCategory(item.document.elementId) || undefined : undefined}
                     isCots={item.document?.elementId ? isCotsPart(item.document.elementId) : false}
+                    hasChildren={item.hasChildren}
+                    isSubassembly={item.isSubassembly}
                     documentId={item.document?.documentId}
                     workspaceId={item.document?.workspaceId}
                     versionId={item.document?.versionId}
@@ -154,14 +155,15 @@ function NestedSubassemblyItem({
                 >
                     <Button
                         size="small"
-                        intent={Intent.PRIMARY}
+                        intent={Intent.NONE}
                         icon={isExpanded ? "chevron-down" : "chevron-right"}
                         onClick={() => onToggleExpanded(item.item)}
                         style={{
                             padding: "3px 8px",
                             fontSize: "11px",
-                            fontWeight: "500",
-                            marginBottom: "3px"
+                            fontWeight: "400",
+                            marginBottom: "3px",
+                            opacity: "0.8"
                         }}
                     >
                         {isExpanded ? "Hide" : "Show"} {showOnlyMissingWeight ? "Missing Weight" : "All"} Components
@@ -208,7 +210,6 @@ function NestedSubassemblyItem({
 
 export function DesignAssistantPartsList({
     filteredDocuments,
-    breakdownMap,
     expandedParts,
     onToggleExpanded,
     showOnlyMissingWeight,
@@ -276,24 +277,27 @@ export function DesignAssistantPartsList({
                             <>
                                 {counts.subassemblies > 0 && (
                                     <Tag 
-                                        intent={Intent.PRIMARY}
-                                        style={{ fontSize: "14px", fontWeight: "600" }}
+                                        minimal
+                                        intent={Intent.NONE}
+                                        style={{ fontSize: "13px", fontWeight: "400", opacity: "0.8" }}
                                     >
                                         {counts.subassemblies} {counts.subassemblies !== 1 ? 'Subassemblies' : 'Subassembly'}
                                     </Tag>
                                 )}
                                 {counts.parts > 0 && (
                                     <Tag 
-                                        intent={Intent.SUCCESS}
-                                        style={{ fontSize: "14px", fontWeight: "600" }}
+                                        minimal
+                                        intent={Intent.NONE}
+                                        style={{ fontSize: "13px", fontWeight: "400", opacity: "0.8" }}
                                     >
                                         {counts.parts} Part{counts.parts !== 1 ? 's' : ''}
                                     </Tag>
                                 )}
                                 {showOnlyMissingWeight && (counts.subassemblies > 0 || counts.parts > 0) && (
                                     <Tag 
+                                        minimal
                                         intent={Intent.DANGER}
-                                        style={{ fontSize: "14px", fontWeight: "600" }}
+                                        style={{ fontSize: "13px", fontWeight: "500" }}
                                     >
                                         Missing Weight
                                     </Tag>
@@ -381,24 +385,14 @@ export function DesignAssistantPartsList({
                 }}
             >
                 {filteredDocuments.map((doc: any) => {
-                    const hasBreakdown = breakdownMap.has(doc.item);
                     const isExpanded = expandedParts.has(doc.item);
-                    const breakdownItems = breakdownMap.get(doc.item) || [];
-                    
-                    // Calculate indentation for hierarchy
-                    const indentLevel = doc.hierarchyLevel || 0;
-                    const indentPx = indentLevel * 15; // Reduced from 20px
                     
                     // Determine mass display
                     const displayMass = doc.displayMass || doc.mass_lb;
-                    const massType = doc.massType || 'direct';
                     
-                    // Enhanced styling for hierarchy levels - more compact
+                    // Simple styling for root-level parts only
                     const hierarchyStyle = {
-                        marginLeft: `${indentPx}px`,
-                        borderLeft: indentLevel > 0 ? "1px solid #CED9E0" : "none",
-                        paddingLeft: indentLevel > 0 ? "8px" : "0px",
-                        marginBottom: "3px", // Reduced spacing
+                        marginBottom: "3px",
                         position: "relative" as const
                     };
 
@@ -409,49 +403,10 @@ export function DesignAssistantPartsList({
                             }-${doc.document?.elementId}`}
                             style={hierarchyStyle}
                         >
-                            {/* Hierarchy indicator line */}
-                            {indentLevel > 0 && (
-                                <div
-                                    style={{
-                                        position: "absolute",
-                                        left: "-1px",
-                                        top: "0",
-                                        bottom: "0",
-                                        width: "1px",
-                                        background: "linear-gradient(to bottom, #CED9E0 50%, transparent 50%)",
-                                        backgroundSize: "1px 6px"
-                                    }}
-                                />
-                            )}
-                            
                             {/* Enhanced Card with Tags */}
                             <div style={{ position: "relative" }}>
                                 {/* Hierarchy and Status Tags - more compact */}
                                 <div style={{ marginBottom: "3px", display: "flex", gap: "3px", flexWrap: "wrap" }}>
-                                    {/* Subassembly tag - enhanced detection for first layer */}
-                                    {(() => {
-                                        // Enhanced subassembly detection
-                                        if (doc.hasChildren === true || doc.isSubassembly === true) return true;
-                                        if (hasBreakdown && breakdownItems.length > 0) return true;
-                                        
-                                        // Check if this item has children in the parts list
-                                        const currentItemStr = String(doc.item || '');
-                                        const hasChildrenInParts = parts.some((part: any) => {
-                                            const partItemStr = String(part.item || '');
-                                            return partItemStr.startsWith(currentItemStr + '.') && 
-                                                   partItemStr.split('.').length === currentItemStr.split('.').length + 1;
-                                        });
-                                        
-                                        return hasChildrenInParts;
-                                    })() && (
-                                        <Tag 
-                                            intent={Intent.PRIMARY} 
-                                            minimal
-                                            icon="folder-close"
-                                        >
-                                            Subassembly
-                                        </Tag>
-                                    )}
                                     
                                     {/* Hierarchy path tag for nested items */}
                                     {doc.parentPath && (
@@ -466,18 +421,6 @@ export function DesignAssistantPartsList({
                                         </Tooltip>
                                     )}
                                     
-                                    {/* Mass calculation indicator */}
-                                    {massType === 'calculated' && (
-                                        <Tooltip content={`Mass calculated from ${doc.children?.length || 0} components`}>
-                                            <Tag 
-                                                intent={Intent.SUCCESS} 
-                                                minimal
-                                                icon="calculator"
-                                            >
-                                                Calculated
-                                            </Tag>
-                                        </Tooltip>
-                                    )}
                                     
                                     {/* Missing material count tag - only show for subassemblies with valid children */}
                                     {doc.isSubassembly && doc.missingMaterialCount > 0 && (doc.children?.length > 0 || doc.hasFilteredChildren) && (
@@ -538,6 +481,8 @@ export function DesignAssistantPartsList({
                                     partNumber={doc.partNumber}
                                     cotsCategory={doc.document?.elementId ? getCotsCategory(doc.document.elementId) || undefined : undefined}
                                     isCots={doc.document?.elementId ? isCotsPart(doc.document.elementId) : false}
+                                    hasChildren={doc.hasChildren || doc.isSubassembly}
+                                    isSubassembly={doc.isSubassembly}
                                     documentId={doc.document?.documentId}
                                     workspaceId={doc.document?.workspaceId}
                                     versionId={doc.document?.versionId}
@@ -547,102 +492,99 @@ export function DesignAssistantPartsList({
                                 />
                             </div>
 
-                            {/* Enhanced breakdown with filtered children for subassemblies */}
-                            {(hasBreakdown || (doc.isSubassembly && doc.hasFilteredChildren)) && (
-                                <div
-                                    style={{
-                                        marginLeft: "15px",
-                                        marginBottom: "5px",
-                                        borderLeft: "1px solid #CED9E0",
-                                        paddingLeft: "10px"
-                                    }}
-                                >
-                                    {/* Show breakdown button (legacy support) */}
-                                    {hasBreakdown && (
-                                        showOnlyMissingWeight 
-                                            ? breakdownItems.filter(isMissingWeight).length > 0
-                                            : true
-                                    ) && (
+                            {/* Show children using new hierarchy system */}
+                            {(() => {
+                                // Find children from allParts for this root-level item
+                                const findRootChildren = (parentItem: string): any[] => {
+                                    const allPartsArray = allParts || parts || [];
+                                    return allPartsArray.filter(part => {
+                                        const partItemNum = String(part.item || '');
+                                        const parentItemNum = String(parentItem || '');
+                                        
+                                        // Direct child pattern: parent "1" -> child "1.1" (exactly one more level)
+                                        if (partItemNum.startsWith(parentItemNum + ".")) {
+                                            const childParts = partItemNum.split('.');
+                                            const parentParts = parentItemNum.split('.');
+                                            return childParts.length === parentParts.length + 1;
+                                        }
+                                        return false;
+                                    });
+                                };
+
+                                const rootChildren = findRootChildren(doc.item);
+                                const hasRootChildren = doc.hasChildren === true || doc.isSubassembly === true || rootChildren.length > 0;
+                                
+                                if (!hasRootChildren) return null;
+
+                                const filteredRootChildren = showOnlyMissingWeight 
+                                    ? rootChildren.filter(isMissingWeight)
+                                    : rootChildren;
+
+                                const shouldShowChildren = filteredRootChildren.length > 0 || !showOnlyMissingWeight;
+
+                                if (!shouldShowChildren) return null;
+
+                                return (
+                                    <div
+                                        style={{
+                                            marginLeft: "15px",
+                                            marginBottom: "5px",
+                                            borderLeft: "1px solid #CED9E0",
+                                            paddingLeft: "10px"
+                                        }}
+                                    >
                                         <Button
                                             size="small"
-                                            intent={Intent.PRIMARY}
-                                            icon={
-                                                isExpanded
-                                                    ? "chevron-down"
-                                                    : "chevron-right"
-                                            }
-                                            onClick={() =>
-                                                onToggleExpanded(doc.item)
-                                            }
+                                            intent={Intent.NONE}
+                                            icon={isExpanded ? "chevron-down" : "chevron-right"}
+                                            onClick={() => onToggleExpanded(doc.item)}
                                             style={{
                                                 padding: "3px 8px",
                                                 fontSize: "11px",
-                                                fontWeight: "500",
+                                                fontWeight: "400",
                                                 marginBottom: "3px",
-                                                marginRight: "5px"
+                                                opacity: "0.8"
                                             }}
                                         >
                                             {isExpanded ? "Hide" : "Show"} {showOnlyMissingWeight ? "Missing Weight" : "All"} Components
                                             ({(() => {
-                                                const items = showOnlyMissingWeight ? breakdownItems.filter(isMissingWeight) : breakdownItems;
-                                                const counts = countSubassembliesAndParts(items);
+                                                const counts = countSubassembliesAndParts(filteredRootChildren);
                                                 return formatCount(counts.subassemblies, counts.parts);
                                             })()})
                                         </Button>
-                                    )}
-                                    
 
-                                    {/* Show all breakdown items */}
-                                    {isExpanded && hasBreakdown && (
-                                        showOnlyMissingWeight 
-                                            ? breakdownItems.filter(isMissingWeight).length > 0
-                                            : true
-                                    ) && (
-                                        <div
-                                            style={{
-                                                marginTop: "5px",
-                                                paddingLeft: "5px"
-                                            }}
-                                        >
-                                            {(() => {
-                                                const filteredBreakdownItems = showOnlyMissingWeight 
-                                                    ? breakdownItems.filter(isMissingWeight)
-                                                    : breakdownItems;
-                                                
-                                                if (filteredBreakdownItems.length === 0 && showOnlyMissingWeight) {
-                                                    return (
-                                                        <div style={{
-                                                            fontSize: "12px",
-                                                            color: "#5C7080",
-                                                            fontStyle: "italic",
-                                                            padding: "8px",
-                                                            textAlign: "center"
-                                                        }}>
-                                                            No components missing weight in this subassembly
-                                                        </div>
-                                                    );
-                                                }
-                                                
-                                                return filteredBreakdownItems.map(
-                                                    (breakdownItem: any) => (
+                                        {/* Show children using NestedSubassemblyItem */}
+                                        {isExpanded && (
+                                            <div style={{ marginTop: "5px" }}>
+                                                {filteredRootChildren.length === 0 && showOnlyMissingWeight ? (
+                                                    <div style={{
+                                                        fontSize: "12px",
+                                                        color: "#5C7080",
+                                                        fontStyle: "italic",
+                                                        padding: "8px",
+                                                        textAlign: "center"
+                                                    }}>
+                                                        No components missing weight in this subassembly
+                                                    </div>
+                                                ) : (
+                                                    filteredRootChildren.map(child => (
                                                         <NestedSubassemblyItem
-                                                            key={`${breakdownItem.item}-${breakdownItem.document?.partId}`}
-                                                            item={breakdownItem}
+                                                            key={`${child.item}-${child.document?.partId}`}
+                                                            item={child}
                                                             allParts={allParts || parts}
                                                             expandedParts={expandedParts}
                                                             onToggleExpanded={onToggleExpanded}
                                                             showOnlyMissingWeight={showOnlyMissingWeight}
                                                             isMissingWeight={isMissingWeight}
-                                                            level={1} // Start at level 1 for first nested items
+                                                            level={1}
                                                         />
-                                                    )
-                                                );
-                                            })()}
-                                        </div>
-                                    )}
-                                    
-                                </div>
-                            )}
+                                                    ))
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })()}
                         </div>
                     );
                 })}

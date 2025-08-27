@@ -286,17 +286,25 @@ export function DesignAssistantHome() {
         // Filter documents based on showOnlyMissingWeight state and part studio context
         let filteredDocuments = showOnlyMissingWeight ? missingWeightData : allFlatParts;
         
+        // IMPORTANT: Only show root-level parts in the main list to fix nesting bug
+        // Child parts should only appear via expansion mechanism
+        filteredDocuments = filteredDocuments.filter(part => 
+            (part.hierarchyLevel || part.indentLevel || 0) === 0
+        );
+        
         // For Part Studios, show only parts that belong to the current part studio (same elementId)
         if (isPartStudio && !showOnlyMissingWeight) {
             const currentElementId = (search as any).elementId;
             filteredDocuments = allFlatParts.filter(part => 
-                part.document?.elementId === currentElementId
+                part.document?.elementId === currentElementId && 
+                (part.hierarchyLevel || part.indentLevel || 0) === 0
             );
         } else if (isPartStudio && showOnlyMissingWeight) {
             // When showing missing weight in part studios, still filter to current part studio
             const currentElementId = (search as any).elementId;
             filteredDocuments = missingWeightData.filter(part => 
-                part.document?.elementId === currentElementId
+                part.document?.elementId === currentElementId && 
+                (part.hierarchyLevel || part.indentLevel || 0) === 0
             );
         }
         
@@ -406,7 +414,6 @@ export function DesignAssistantHome() {
         parts,
         currentDocumentParts,
         importedParts,
-        breakdownMap,
         weightData,
         missingWeightData,
         filteredDocuments
@@ -603,7 +610,6 @@ export function DesignAssistantHome() {
                 showOnlyMissingWeight={showOnlyMissingWeight}
                 onToggleMissingWeight={handleToggleMissingWeight}
                 filteredDocuments={filteredDocuments}
-                breakdownMap={breakdownMap}
                 expandedParts={expandedParts}
                 onToggleExpanded={toggleExpanded}
                 parts={parts}
@@ -618,7 +624,6 @@ export function DesignAssistantHome() {
                 onSearchChange={setSearchTerm}
                 vendorFilter={vendorFilter}
                 onVendorFilterChange={setVendorFilter}
-                documentId={(search as any)?.documentId}
             />
         </div>
     );

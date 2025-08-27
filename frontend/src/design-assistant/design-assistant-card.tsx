@@ -26,6 +26,9 @@ interface DesignAssistantCardProps {
     partNumber?: string;
     cotsCategory?: string;
     isCots?: boolean;
+    // Assembly/subassembly detection properties
+    hasChildren?: boolean;
+    isSubassembly?: boolean;
     // Onshape link properties
     documentId?: string;
     workspaceId?: string;
@@ -49,6 +52,8 @@ export function DesignAssistantCard(
         partNumber,
         cotsCategory,
         isCots,
+        hasChildren,
+        isSubassembly,
         documentId,
         workspaceId,
         versionId,
@@ -73,8 +78,8 @@ export function DesignAssistantCard(
         return genericPatterns.some((pattern) => pattern.test(name.trim()));
     }, []);
 
-    // Create Onshape URL and copy to clipboard
-    const copyOnshapeLink = useCallback(() => {
+    // Create Onshape URL and open in new tab
+    const openOnshapeLink = useCallback(() => {
         if (!documentId || !elementId) {
             console.warn("Missing required IDs for Onshape link:", {
                 documentId,
@@ -108,14 +113,9 @@ export function DesignAssistantCard(
             return;
         }
 
-        navigator.clipboard
-            .writeText(onshapeUrl)
-            .then(() => {
-                console.log("Onshape link copied to clipboard:", onshapeUrl);
-            })
-            .catch((err) => {
-                console.error("Failed to copy link to clipboard:", err);
-            });
+        // Open in new tab
+        window.open(onshapeUrl, '_blank', 'noopener,noreferrer');
+        console.log("Opened Onshape link in new tab:", onshapeUrl);
     }, [
         documentId,
         workspaceId,
@@ -125,14 +125,17 @@ export function DesignAssistantCard(
         elementId
     ]);
 
-    // Check if we have all required data for the copy link button
-    const canCopyLink =
+    // Check if we have all required data for the open link button
+    const canOpenLink =
         documentId &&
         elementId &&
         ((wvmType === "w" && workspaceId) ||
             (wvmType === "v" && versionId) ||
             (wvmType === "m" && microversionId) ||
             workspaceId); // Fallback for parts without explicit wvmType
+
+    // Check if this is a subassembly/assembly (has children)
+    const isAssemblyOrSubassembly = hasChildren === true || isSubassembly === true;
 
 
     return (
@@ -143,7 +146,7 @@ export function DesignAssistantCard(
                 margin: 0,
                 borderRadius: 0,
                 borderTop: "none",
-                borderLeft: "none",
+                borderLeft: isAssemblyOrSubassembly ? "4px solid #137CBD" : "none", // Blue bar for assemblies/subassemblies
                 borderRight: "none",
                 maxWidth: "100%",
                 width: "auto"
@@ -156,14 +159,27 @@ export function DesignAssistantCard(
                     style={{
                         display: "flex",
                         alignItems: "center",
-                        justifyContent: "space-between"
+                        justifyContent: "space-between",
+                        marginBottom: "2px"
                     }}
                 >
-                    <EntityTitle title={<Text>{document.name}</Text>} />
+                    <EntityTitle 
+                        title={
+                            <Text 
+                                style={{ 
+                                    fontSize: "16px", 
+                                    fontWeight: "600",
+                                    lineHeight: "1.3"
+                                }}
+                            >
+                                {document.name}
+                            </Text>
+                        } 
+                    />
                     <div
                         style={{
-                            fontSize: "11px",
-                            color: "#667",
+                            fontSize: "10px",
+                            opacity: 0.6,
                             flexShrink: 0
                         }}
                     >
@@ -185,7 +201,7 @@ export function DesignAssistantCard(
                                 : "Unknown"
                         } lbs`}
                     >
-                        <Tag intent={Intent.PRIMARY}>Qty: {quantity}</Tag>
+                        <Tag minimal intent={Intent.NONE}>Qty: {quantity}</Tag>
                     </Tooltip>
 
                     <Tooltip
@@ -195,45 +211,48 @@ export function DesignAssistantCard(
                                 : "No mass data available"
                         }
                     >
-                        <Tag intent={Intent.WARNING}>
+                        <Tag minimal intent={!mass ? Intent.DANGER : Intent.NONE}>
                             Mass: {mass ? `${mass.toFixed(2)} lbs` : "Unknown"}
                         </Tag>
                     </Tooltip>
 
-                    <Tooltip
-                        content={
-                            !mass
-                                ? "No weight data available for this part"
-                                : `Material: ${
-                                      material?.displayName ||
+                    {/* Only show material box for individual parts, not assemblies/subassemblies */}
+                    {!isAssemblyOrSubassembly && (
+                        <Tooltip
+                            content={
+                                !mass
+                                    ? "No weight data available for this part"
+                                    : `Material: ${
+                                          material?.displayName ||
+                                          material?.name ||
+                                          (typeof material === "string"
+                                              ? material
+                                              : "Unknown Material")
+                                      }${
+                                          material?.density
+                                              ? ` | Density: ${material.density}`
+                                              : ""
+                                      }${
+                                          material?.type
+                                              ? ` | Type: ${material.type}`
+                                              : ""
+                                      }`
+                            }
+                        >
+                            <Tag minimal intent={!mass ? Intent.DANGER : (material ? Intent.NONE : Intent.WARNING)}>
+                                {!mass
+                                    ? "No Weight"
+                                    : material?.displayName ||
                                       material?.name ||
                                       (typeof material === "string"
                                           ? material
-                                          : "Unknown Material")
-                                  }${
-                                      material?.density
-                                          ? ` | Density: ${material.density}`
-                                          : ""
-                                  }${
-                                      material?.type
-                                          ? ` | Type: ${material.type}`
-                                          : ""
-                                  }`
-                        }
-                    >
-                        <Tag intent={!mass ? Intent.DANGER : Intent.SUCCESS}>
-                            {!mass
-                                ? "No Weight"
-                                : material?.displayName ||
-                                  material?.name ||
-                                  (typeof material === "string"
-                                      ? material
-                                      : "Unknown Material")}
-                        </Tag>
-                    </Tooltip>
+                                          : "Unknown Material")}
+                            </Tag>
+                        </Tooltip>
+                    )}
 
                     {documentSource === "imported" && !isCots && (
-                        <Tag intent={Intent.NONE} icon="import">
+                        <Tag minimal intent={Intent.NONE} icon="import">
                             Imported
                         </Tag>
                     )}
@@ -241,7 +260,7 @@ export function DesignAssistantCard(
                     {/* Generic part name indicator */}
                     {isGenericPartName(document.name) && (
                         <Tooltip content="This part has a generic name like 'Part 1'. Consider giving it a more descriptive name in Onshape.">
-                            <Tag intent={Intent.WARNING} icon="warning-sign">
+                            <Tag minimal intent={Intent.NONE} icon="warning-sign">
                                 Not Named
                             </Tag>
                         </Tooltip>
@@ -250,7 +269,7 @@ export function DesignAssistantCard(
                     {/* Vendor tag */}
                     {vendor && (
                         <Tooltip content={`Vendor: ${vendor}`}>
-                            <Tag intent={Intent.NONE} icon="shop">
+                            <Tag minimal intent={Intent.NONE} icon="shop">
                                 {vendor}
                             </Tag>
                         </Tooltip>
@@ -259,7 +278,7 @@ export function DesignAssistantCard(
                     {/* Part Number tag */}
                     {partNumber && (
                         <Tooltip content={`Part Number: ${partNumber}`}>
-                            <Tag intent={Intent.NONE} icon="barcode">
+                            <Tag minimal intent={Intent.NONE} icon="barcode">
                                 {partNumber}
                             </Tag>
                         </Tooltip>
@@ -274,23 +293,23 @@ export function DesignAssistantCard(
                                     : "Component from FRC Design Library with verified specifications"
                             }
                         >
-                            <Tag intent={Intent.SUCCESS} icon="book">
+                            <Tag minimal intent={Intent.NONE} icon="book">
                                 FRCDesignLib
                             </Tag>
                         </Tooltip>
                     )}
 
-                    {/* Copy Onshape Link button */}
-                    {canCopyLink && (
-                        <Tooltip content="Copy Onshape link to clipboard">
+                    {/* Open Onshape Link button */}
+                    {canOpenLink && (
+                        <Tooltip content="Open in Onshape in a new tab">
                             <Button
                                 size="small"
-                                minimal
-                                icon="clipboard"
-                                intent={Intent.PRIMARY}
-                                onClick={copyOnshapeLink}
+                                icon="share"
+                                intent={Intent.NONE}
+                                onClick={openOnshapeLink}
+                                style={{ opacity: 0.7, background: 'transparent', border: 'none' }}
                             >
-                                Copy Link
+                                Open Link
                             </Button>
                         </Tooltip>
                     )}
