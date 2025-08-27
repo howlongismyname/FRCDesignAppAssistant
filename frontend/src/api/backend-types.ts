@@ -32,6 +32,25 @@ export enum Vendor {
     WCP = "WCP"
 }
 
+export enum CotsCategory {
+    MOTORS_SERVOS = "Motors & Servos",
+    EXTRUSIONS_SHAFTS = "Extrusions & Shafts", 
+    KRAYON_CAD = "KrayonCAD",
+    GEARBOXES = "Gearboxes",
+    SWERVE = "Swerve",
+    PULLEYS_BELT = "Pulleys & Belt Accessories",
+    FASTENERS = "Fasteners",
+    WHEELS = "Wheels",
+    BEARINGS_BUSHINGS = "Bearings & Bushings",
+    SHAFT_BEARING_ACCESSORIES = "Shaft & Bearing Accessories",
+    GEARS = "Gears",
+    CONTROL_SYSTEM = "Control System",
+    SENSORS = "Sensors",
+    SPROCKETS_CHAIN = "Sprockets & Chain Accessories",
+    SPACERS_STANDOFFS = "Spacers & Standoffs",
+    LINEAR_COMPONENTS = "Linear Mechanism Components"
+}
+
 /**
  * Gets the full name of a vendor.
  */
@@ -269,6 +288,7 @@ export function encodeConfigurationForQuery(
 }
 
 export type Configuration = Record<string, string>;
+
 
 // export function isConfigurationValid(
 //     configuration: Configuration

@@ -98,4 +98,8 @@ def create_app():
         def serve_app_hmr(current_path: str):
             return flask.render_template("index.html")
 
+    # Register design assistant blueprint AFTER other routes are defined
+    from backend.endpoints import design_assistant
+    app.register_blueprint(design_assistant.router, url_prefix="/app/designassistant")
+
     return app

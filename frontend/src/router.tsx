@@ -20,8 +20,11 @@ import {
 import { SafariError } from "./pages/safari-error";
 import { MenuParams } from "./api/menu-params";
 import { OnshapeParams } from "./api/onshape-params";
-import { AccessLevel, Vendor } from "./api/backend-types";
+import { AccessLevel, Vendor, CotsCategory } from "./api/backend-types";
 import { AppError } from "./app/app-error";
+import { DesignAssistant } from "./design-assistant/design-assistant";
+import { DesignAssistantHome } from "./design-assistant/design-assistant-home";
+
 
 export interface BaseSearchParams {
     /**
@@ -34,6 +37,7 @@ export interface BaseSearchParams {
     accessLevel: AccessLevel;
     query?: string;
     vendors?: Vendor[];
+    cotsCategories?: CotsCategory[];
 }
 
 type SearchParams = OnshapeParams & BaseSearchParams & MenuParams;
@@ -89,6 +93,25 @@ const documentListRoute = createRoute({
     component: DocumentList
 });
 
+const designAssistantRoute = createRoute({
+    getParentRoute: () => appRoute, // Changed from rootRoute to appRoute
+    path: "designassistant", // This creates /app/designassistant
+    component: DesignAssistant,
+    // Add SearchSchemaInput so search parameters become optional
+    validateSearch: (search: Record<string, unknown> & SearchSchemaInput) => {
+        return search as unknown as SearchParams;
+    },
+    search: {
+        middlewares: [retainSearchParams(true)]
+    }
+});
+
+const designAssistantHomeRoute = createRoute({
+    getParentRoute: () => designAssistantRoute,
+    path: "/",
+    component: DesignAssistantHome
+});
+
 const grantDeniedRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "grant-denied",
@@ -109,7 +132,10 @@ const safariErrorRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
     appRoute.addChildren([
-        homeRoute.addChildren([homeListRoute, documentListRoute])
+        homeRoute.addChildren([homeListRoute, documentListRoute]),
+        designAssistantRoute.addChildren([
+            designAssistantHomeRoute,
+        ])
     ]),
     grantDeniedRoute,
     licenseRoute,

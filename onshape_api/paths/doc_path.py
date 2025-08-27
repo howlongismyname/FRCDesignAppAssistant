@@ -172,6 +172,14 @@ class ElementPath(InstancePath):
             and self.element_id == other.element_id
         )
 
+    def to_instance_path(self) -> InstancePath:
+        """Converts this ElementPath to an InstancePath by removing the element_id."""
+        return InstancePath(
+            self.document_id,
+            self.instance_id,
+            instance_type=self.instance_type
+        )
+
 
 class PartPath(ElementPath):
     """Represents a part in a part studio."""

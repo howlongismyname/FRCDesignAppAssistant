@@ -53,7 +53,7 @@ export function VendorFilters(): ReactNode {
     );
 
     return (
-        <div className="split" style={{ gap: "5x" }}>
+        <div className="center" style={{ gap: "5x" }}>
             <div className="vendor-filter-tags">{filterTags}</div>
             {clearButton}
         </div>

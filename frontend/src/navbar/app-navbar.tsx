@@ -17,6 +17,7 @@ import frcDesignBook from "/frc-design-book.svg";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { AppMenu } from "../api/menu-params";
 import { VendorFilters } from "./vendor-filters";
+import { CategoryFilters } from "./category-filters";
 
 /**
  * Provides top-level navigation for the app.
@@ -26,7 +27,7 @@ export function AppNavbar(): ReactNode {
     const navigate = useNavigate();
 
     const [showFilters, setShowFilters] = useState(false);
-
+    const isDesignAssistantPage = pathname.startsWith('/app/designassistant');
     const frcDesignIcon = (
         <a href="https://frcdesign.org" target="_blank">
             <img
@@ -69,7 +70,7 @@ export function AppNavbar(): ReactNode {
                 <NavbarGroup>
                     {frcDesignIcon}
                     <NavbarDivider />
-                    {searchGroup}
+                    {!isDesignAssistantPage && searchGroup}
                 </NavbarGroup>
                 <NavbarGroup align={Alignment.END}>
                     <SettingsButton />
@@ -77,7 +78,14 @@ export function AppNavbar(): ReactNode {
             </div>
             <div style={{ marginBottom: showFilters ? "10px" : "0px" }}>
                 <Collapse isOpen={showFilters}>
-                    <VendorFilters />
+                    <div style={{ marginBottom: "10px" }}>
+                        <strong>Vendors:</strong>
+                        <VendorFilters />
+                    </div>
+                    <div>
+                        <strong>FRCDesignLib Categories:</strong>
+                        <CategoryFilters />
+                    </div>
                 </Collapse>
             </div>
         </Navbar>

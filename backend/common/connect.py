@@ -29,6 +29,45 @@ def get_token(db: Database) -> dict | None:
     return get_session_data(db).get("token")
 
 
+def is_token_expired_or_expiring_soon(token: dict | None, buffer_seconds: int = 300) -> bool:
+    """Check if token is expired or will expire within buffer_seconds (default 5 minutes)."""
+    if not token:
+        return True
+    
+    expires_at = token.get('expires_at')
+    if not expires_at:
+        return True  # No expiration info, assume expired
+    
+    import time
+    return expires_at <= (time.time() + buffer_seconds)
+
+
+def refresh_token_if_needed(db: Database) -> bool:
+    """Proactively refresh token if it's expired or expiring soon. Returns True if refresh attempted."""
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    token = get_token(db)
+    session_id = get_session_id()
+    
+    if is_token_expired_or_expiring_soon(token):
+        logger.info(f"Token expired or expiring soon for session {session_id}, attempting proactive refresh")
+        try:
+            # Create OAuth session and let it handle the refresh
+            oauth_session = get_oauth_session(db)
+            # Making any request will trigger auto-refresh if needed
+            # We'll just check if the token got updated
+            new_token = get_token(db)
+            if new_token != token:
+                logger.info(f"Token successfully refreshed for session {session_id}")
+                return True
+        except Exception as e:
+            logger.error(f"Proactive token refresh failed for session {session_id}: {str(e)}")
+            return False
+    
+    return False
+
+
 def save_token(db: Database, token: dict) -> None:
     set_session_data(db, {"token": token})
 
@@ -73,7 +112,16 @@ def get_oauth_session(
     }
 
     def _save_token(token) -> None:
-        save_token(db, token)
+        import logging
+        logger = logging.getLogger(__name__)
+        try:
+            logger.info(f"OAuth token being refreshed for session {get_session_id()}")
+            logger.debug(f"New token expires at: {token.get('expires_at', 'unknown')}")
+            save_token(db, token)
+            logger.info("OAuth token successfully saved to Firestore")
+        except Exception as e:
+            logger.error(f"Failed to save refreshed OAuth token: {str(e)}")
+            raise
 
     return OAuth2Session(
         env.CLIENT_ID,
@@ -119,7 +167,40 @@ def get_db() -> Database:
 
 
 def get_api(db: Database) -> onshape_api.OAuthApi:
-    return onshape_api.make_oauth_api(get_oauth_session(db))
+    import logging
+    import time
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # Check if we have a token
+        token = get_token(db)
+        session_id = get_session_id()
+        
+        if token is None:
+            logger.warning(f"No OAuth token found for session {session_id}")
+            raise backend_exceptions.ServerException("No OAuth token available - user needs to authenticate")
+        
+        # Proactively refresh token if needed
+        refresh_token_if_needed(db)
+        
+        oauth_session = get_oauth_session(db)
+        api = onshape_api.make_oauth_api(oauth_session)
+        logger.debug(f"Successfully created OAuth API for session {session_id}")
+        return api
+        
+    except Exception as e:
+        logger.error(f"Failed to create OAuth API for session {get_session_id()}: {str(e)}")
+        
+        # If token refresh or OAuth setup fails, clean up the corrupted session
+        if "refresh" in str(e).lower() or "token" in str(e).lower():
+            logger.info(f"Cleaning up corrupted OAuth session {get_session_id()}")
+            try:
+                # Clear the corrupted token
+                set_session_data(db, {"token": None})
+            except:
+                pass  # Don't let cleanup errors crash the whole thing
+                
+        raise backend_exceptions.ServerException(f"OAuth authentication failed: {str(e)}")
 
 
 def get_route_instance_path() -> onshape_api.InstancePath:
