@@ -1,4 +1,5 @@
 import { Button, Intent, Callout, H2 } from "@blueprintjs/core";
+import { Link } from "@tanstack/react-router";
 
 interface DesignAssistantDebugProps {
     showDebugButtons: boolean;
@@ -77,6 +78,16 @@ export function DesignAssistantDebug({
                 >
                     Copy Raw BOM Data
                 </Button>
+                <Link to="/app/designassistant/test" search={(prev) => prev}>
+                    <Button
+                        small
+                        intent={Intent.SUCCESS}
+                        icon="lab-test"
+                        style={{ marginLeft: "10px" }}
+                    >
+                        🧪 Test Structured Storage
+                    </Button>
+                </Link>
             </div>
 
             {/* Debug: Show document source info for first few parts */}

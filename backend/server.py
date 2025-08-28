@@ -101,5 +101,10 @@ def create_app():
     # Register design assistant blueprint AFTER other routes are defined
     from backend.endpoints import design_assistant
     app.register_blueprint(design_assistant.router, url_prefix="/app/designassistant")
+    
+    # TESTING ONLY: Register structured storage test endpoints (REMOVE FOR PRODUCTION)
+    if not env.IS_PRODUCTION:
+        from backend.endpoints.structured_storage_test import test_router
+        app.register_blueprint(test_router, url_prefix="/app/test/structured-storage")
 
     return app

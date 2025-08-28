@@ -547,6 +547,10 @@ def get_available_documents():
         flask.current_app.logger.info(
             f"Computed IDs: {{did: {ids['documentId']}, wvm: {ids['wvm']}, wvmid: {ids['wvmid']}, eid: {ids['elementId']}}}"
         )
+        
+        # Debug session for comparison with test endpoint
+        session_id = flask.session.get("session_id", "NO_SESSION")
+        flask.current_app.logger.info(f"MAIN APP - Session ID: {session_id}")
 
         # Handle part studios differently - look for cached assembly data
         if element_type == "PARTSTUDIO":

@@ -24,6 +24,7 @@ import { AccessLevel, Vendor, CotsCategory } from "./api/backend-types";
 import { AppError } from "./app/app-error";
 import { DesignAssistant } from "./design-assistant/design-assistant";
 import { DesignAssistantHome } from "./design-assistant/design-assistant-home";
+import { StructuredStorageTest } from "./structured-storage-test/structured-storage-test";
 
 
 export interface BaseSearchParams {
@@ -112,6 +113,13 @@ const designAssistantHomeRoute = createRoute({
     component: DesignAssistantHome
 });
 
+// TESTING ONLY: Structured storage test route (REMOVE FOR PRODUCTION)
+const structuredStorageTestRoute = createRoute({
+    getParentRoute: () => designAssistantRoute,
+    path: "/test",
+    component: StructuredStorageTest
+});
+
 const grantDeniedRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "grant-denied",
@@ -135,6 +143,7 @@ const routeTree = rootRoute.addChildren([
         homeRoute.addChildren([homeListRoute, documentListRoute]),
         designAssistantRoute.addChildren([
             designAssistantHomeRoute,
+            structuredStorageTestRoute, // TESTING ONLY
         ])
     ]),
     grantDeniedRoute,
