@@ -7,7 +7,7 @@ from onshape_api.assertions import assert_workspace
 from onshape_api.endpoints.configurations import encode_configuration
 from onshape_api.endpoints.documents import ElementType
 from onshape_api.paths.api_path import api_path
-from onshape_api.paths.paths import ElementPath, InstancePath
+from onshape_api.paths.doc_path import ElementPath, InstancePath
 
 
 def get_assembly(
@@ -162,3 +162,58 @@ def delete_feature(api: Api, assembly_path: ElementPath, feature_id: str) -> dic
             feature_id=feature_id,
         )
     )
+
+
+def get_assembly_definition(api: Api, assembly_path: ElementPath) -> dict:
+    """Gets the assembly definition including structure and occurrence IDs."""
+    return api.get(api_path("assemblies", assembly_path, ElementPath, "definition"))
+
+
+def get_assembly_mass_properties(api: Api, assembly_path: ElementPath) -> dict:
+    """Gets mass properties for all occurrences in an assembly."""
+    return api.get(api_path("assemblies", assembly_path, ElementPath, "massproperties"))
+
+
+def get_assembly_bom(api: Api, assembly_path: ElementPath) -> dict:
+    """Gets the Bill of Materials (BOM) for an assembly.
+
+    Args:
+        api: The Onshape API instance
+        assembly_path: Path to the assembly element
+
+    Returns:
+        BOM data including parts, quantities, materials, and mass information
+    """
+    query_params = {
+        "bom": "bomColumnIds=Vendor&bomColumnIds=Part%20Number&indented=true",
+        "indented": "true",
+        "multiLevel": "true",
+        "generateIfAbsent": "true",
+        "includeExcluded": "true",
+        "onlyVisibleColumns": "false",
+        "ignoreSubassemblyBomBehavior": "true",
+        "includeItemMicroversions": "false",
+        "includeTopLevelAssemblyRow": "false",  # Changed from true to false
+        "thumbnail": "false",
+        "respectSubassemblyBomBehavior": "true",
+    }
+
+    # Construct the API path
+    api_path_str = api_path("assemblies", assembly_path, ElementPath, "bom")
+
+    # Log the final URL at INFO level as requested
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"BOM API call: {api_path_str}")
+
+    try:
+        result = api.get(api_path_str, query=query_params)
+        logger.info(
+            f"BOM API call successful, result keys: {list(result.keys()) if result else 'None'}"
+        )
+        return result
+    except Exception as e:
+        logger.error(f"BOM API call failed: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        raise e

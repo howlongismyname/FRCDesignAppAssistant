@@ -6,7 +6,7 @@
         {
             "label": "Deploy app",
             "type": "shell",
-            "command": "gcloud app deploy",
+            "command": "gcloud app deploy --project=frc-design-lib",
             "problemMatcher": [],
             "group": {
                 "kind": "build"
@@ -71,6 +71,11 @@
                 "--port",
                 "3000"
             ],
+            "options": {
+                "env": {
+                    "PATH": "${env:HOME}/.local/bin:${env:PATH}"
+                }
+            },
             "presentation": {
                 "group": "server"
             },
