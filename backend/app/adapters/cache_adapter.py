@@ -1,6 +1,7 @@
 """Cache adapters for in-memory and Redis caching."""
 
 import asyncio
+import fnmatch
 import json
 import logging
 from typing import Any, Optional, Dict
@@ -75,13 +76,13 @@ class MemoryCacheAdapter:
             self.cache.clear()
     
     async def keys(self, pattern: str = "*") -> list[str]:
-        """Get keys matching pattern (simple string matching)."""
+        """Get keys matching pattern (glob-style matching)."""
         async with self._lock:
             if pattern == "*":
                 return list(self.cache.keys())
             else:
-                # Simple pattern matching
-                return [key for key in self.cache.keys() if pattern.replace("*", "") in key]
+                # Use fnmatch for proper glob pattern matching
+                return list(fnmatch.filter(self.cache.keys(), pattern))
     
     def _evict_lru(self) -> None:
         """Evict least recently used item."""
@@ -349,6 +350,16 @@ class TieredCacheAdapter:
         """Clear both caches."""
         await self.memory_cache.clear()
         await self.redis_cache.clear()
+    
+    async def keys(self, pattern: str = "*") -> list[str]:
+        """Get unique keys from both caches matching pattern."""
+        # Get keys from both caches
+        memory_keys = await self.memory_cache.keys(pattern)
+        redis_keys = await self.redis_cache.keys(pattern)
+        
+        # Convert to sets to ensure uniqueness, then union and convert back to list
+        unique_keys = set(memory_keys) | set(redis_keys)
+        return list(unique_keys)
     
     async def stats(self) -> Dict[str, Any]:
         """Get combined cache statistics."""

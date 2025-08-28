@@ -14,6 +14,8 @@ from backend.services.onshape_bom import (
     process_bom_data,
 )
 from backend.common.connect import get_session_id, get_db
+from backend.domain.config import get_config
+from backend.adapters.repository_factory import get_repository_factory
 from datetime import datetime, timezone
 import time
 
@@ -297,23 +299,26 @@ def get_bom_data():
                     },
                 }
         else:
-            # Rate limiting for force refresh - check if user can refresh again
-            last_refresh_key = (
-                f"last_refresh_{session_id}_{ids['documentId']}_{ids['elementId']}"
+            # Rate limiting for force refresh using session repository
+            factory = get_repository_factory()
+            session_repo = factory.get_session_repository()
+            
+            # Check if refresh is allowed
+            is_allowed, remaining_seconds = session_repo.is_refresh_allowed(
+                session_id, ids['documentId'], ids['elementId']
             )
-            last_refresh_time = flask.session.get(last_refresh_key, 0)
-            current_time = time.time()
-
-            if current_time - last_refresh_time < 30:  # 30 second cooldown
-                remaining_time = 30 - int(current_time - last_refresh_time)
+            
+            if not is_allowed:
                 return {
                     "error": "rate_limited",
-                    "message": f"Please wait {remaining_time} seconds before refreshing again",
-                    "remainingSeconds": remaining_time,
+                    "message": f"Please wait {remaining_seconds} seconds before refreshing again",
+                    "remainingSeconds": remaining_seconds,
                 }, 429
 
             # Update last refresh time
-            flask.session[last_refresh_key] = current_time
+            session_repo.save_refresh_cooldown(
+                session_id, ids['documentId'], ids['elementId'], time.time()
+            )
 
         # Fetch fresh data from Onshape API
         try:
@@ -447,17 +452,18 @@ def get_refresh_cooldown():
         ids = extract_onshape_ids(flask.request.args)
         session_id = get_session_id()
 
-        last_refresh_key = (
-            f"last_refresh_{session_id}_{ids['documentId']}_{ids['elementId']}"
+        # Check refresh cooldown using session repository
+        factory = get_repository_factory()
+        session_repo = factory.get_session_repository()
+        
+        is_allowed, remaining_seconds = session_repo.is_refresh_allowed(
+            session_id, ids['documentId'], ids['elementId']
         )
-        last_refresh_time = flask.session.get(last_refresh_key, 0)
-        current_time = time.time()
-
-        if current_time - last_refresh_time < 30:
-            remaining_time = 30 - int(current_time - last_refresh_time)
-            return {"canRefresh": False, "remainingSeconds": remaining_time}
-        else:
-            return {"canRefresh": True, "remainingSeconds": 0}
+        
+        return {
+            "canRefresh": is_allowed,
+            "remainingSeconds": remaining_seconds
+        }
 
     except Exception as e:
         flask.current_app.logger.error(f"Error checking refresh cooldown: {str(e)}")

@@ -2,6 +2,7 @@ from google.cloud import firestore
 from google.cloud.firestore import CollectionReference, DocumentReference
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
+from backend.domain.config import get_config
 
 
 class Database:
@@ -86,9 +87,11 @@ class Database:
         session_id: str,
         document_id: str,
         element_id: str,
-        max_age_hours: int = 24,
+        max_age_hours: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """Get BOM data from Firestore if it's recent enough."""
+        if max_age_hours is None:
+            max_age_hours = get_config().bom_cache_hours
         doc_id = f"{session_id}_{document_id}_{element_id}"
         doc = self.bom_sessions.document(doc_id).get()
 
@@ -130,9 +133,11 @@ class Database:
         session_id: str,
         document_id: str,
         workspace_id: str,
-        max_age_hours: int = 24,
+        max_age_hours: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         """Get BOM data from Firestore by workspace ID (for part studios)."""
+        if max_age_hours is None:
+            max_age_hours = get_config().bom_cache_hours
         # Query for BOM sessions in the same document/workspace
         query = (
             self.bom_sessions
@@ -177,8 +182,10 @@ class Database:
 
         return data
 
-    def cleanup_old_bom_sessions(self, max_age_hours: int = 24) -> None:
+    def cleanup_old_bom_sessions(self, max_age_hours: Optional[int] = None) -> None:
         """Clean up old BOM sessions to prevent database bloat."""
+        if max_age_hours is None:
+            max_age_hours = get_config().bom_cache_hours
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
 
         # Query for old sessions
@@ -187,18 +194,19 @@ class Database:
         # Delete old sessions in batches
         batch = self.client.batch()
         count = 0
+        batch_size = get_config().cleanup_batch_size
 
         for doc in old_sessions:
             batch.delete(doc.reference)
             count += 1
 
-            # Commit batch every 500 operations
-            if count % 500 == 0:
+            # Commit batch every batch_size operations
+            if count % batch_size == 0:
                 batch.commit()
                 batch = self.client.batch()
 
         # Commit remaining operations
-        if count % 500 != 0:
+        if count % batch_size != 0:
             batch.commit()
 
 

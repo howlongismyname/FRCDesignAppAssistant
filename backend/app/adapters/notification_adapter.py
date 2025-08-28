@@ -154,11 +154,14 @@ class WebhookNotificationAdapter:
                     headers=headers
                 )
                 
-                if response.status_code == 200:
+                # Accept any 2xx status code as success
+                if 200 <= response.status_code < 300:
                     logger.debug(f"Webhook sent successfully to {url}")
                     return
                 else:
-                    logger.warning(f"Webhook {url} returned {response.status_code}")
+                    # For non-2xx responses, include response body for debugging
+                    response_text = response.text
+                    logger.warning(f"Webhook {url} returned {response.status_code}: {response_text}")
                     
             except Exception as e:
                 logger.warning(f"Webhook {url} attempt {attempt + 1} failed: {e}")
@@ -269,11 +272,16 @@ class SlackNotificationAdapter:
         try:
             response = await self.client.post(self.webhook_url, json=message)
             
-            if response.status_code != 200:
-                logger.error(f"Slack notification failed: {response.status_code}")
+            # Treat any 2xx status code as success
+            if 200 <= response.status_code < 300:
+                return
+            
+            # For non-2xx responses, get response text for better diagnostics
+            response_text = await response.aread() if hasattr(response, 'aread') else response.text
+            logger.error(f"Slack notification failed: status {response.status_code}, response: {response_text}")
                 
         except Exception as e:
-            logger.error(f"Failed to send Slack notification: {e}")
+            logger.error(f"Failed to send Slack notification: {e}", exc_info=True)
 
 
 class EmailNotificationAdapter:

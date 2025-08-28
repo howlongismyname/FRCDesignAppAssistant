@@ -3,64 +3,16 @@
 import logging
 from typing import Dict, Any, Optional
 from .onshape_client import fetch_bom_data
+from ..domain.weight_calculator import parse_mass
+from ..domain.bom_analyzer import (
+    has_material, detect_bom_format, extract_part_data_from_row,
+    detect_subassembly_status, determine_current_document_status, build_document_info
+)
+from ..domain.hierarchy_builder import build_hierarchy, calculate_hierarchical_masses
 
 logger = logging.getLogger(__name__)
 
 
-def parse_mass(mass_str: str) -> Optional[float]:
-    """Parse mass string and convert to pounds.
-
-    Args:
-        mass_str: Mass string like "1.5 lb", "2.3 kg", "500 g"
-
-    Returns:
-        Mass in pounds, or None if parsing fails
-    """
-    if not mass_str or mass_str == "N/A":
-        return None
-
-    try:
-        # Split by space to separate number and unit
-        parts = mass_str.strip().split()
-        if len(parts) == 0:
-            return None
-
-        value = float(parts[0])
-        unit = parts[1].lower() if len(parts) > 1 else "lb"
-
-        # Convert to pounds
-        if unit in ["kg", "kgs", "kilogram", "kilograms"]:
-            return value * 2.20462
-        elif unit in ["g", "gram", "grams"]:
-            return value * 0.00220462
-        elif unit in ["lb", "lbs", "pound", "pounds"]:
-            return value
-        else:
-            # Default to pounds if unit is unrecognized
-            return value
-
-    except (ValueError, IndexError):
-        return None
-
-
-def has_material(material: Any) -> bool:
-    """Check if a part has material assigned.
-
-    Args:
-        material: Material data from BOM
-
-    Returns:
-        True if material is present, False otherwise
-    """
-    if not material:
-        return False
-
-    if isinstance(material, str):
-        return bool(material.strip())
-    elif isinstance(material, dict):
-        return bool(material.get("displayName") or material.get("id"))
-
-    return False
 
 
 def process_bom_data(bom_data: dict, document_id: str = None) -> Dict[str, Any]:
@@ -72,38 +24,8 @@ def process_bom_data(bom_data: dict, document_id: str = None) -> Dict[str, Any]:
     Returns:
         Processed data with weight metrics and missing material report
     """
-    # Handle None or empty dict
-    if not bom_data:
-        return {
-            "weight_metrics": {
-                "unit": "lb",
-                "total_weight": 0.0,
-                "rows_counted": 0,
-                "rows_skipped": 0,
-            },
-            "missing_material_parts": [],
-        }
-
-    # Handle both formats: direct format (headers/rows at root) and wrapped format (bomTable wrapper)
-    if "bomTable" in bom_data:
-        # Legacy format with bomTable wrapper
-        bom_table = bom_data["bomTable"]
-        if not bom_table or bom_table is None:
-            return {
-                "weight_metrics": {
-                    "unit": "lb",
-                    "total_weight": 0.0,
-                    "rows_counted": 0,
-                    "rows_skipped": 0,
-                },
-                "missing_material_parts": [],
-            }
-        headers = bom_table.get("headers", [])
-        rows = bom_table.get("rows", [])
-    else:
-        # Direct format (current Onshape API v12)
-        headers = bom_data.get("headers", [])
-        rows = bom_data.get("rows", [])
+    # Detect BOM format and extract headers and rows
+    headers, rows = detect_bom_format(bom_data)
 
     # If no rows, return empty result instead of raising
     if not rows:
@@ -304,8 +226,8 @@ def process_bom_data(bom_data: dict, document_id: str = None) -> Dict[str, Any]:
             continue
     
     # Second pass: Build parent-child relationships and calculate hierarchical masses
-    _build_hierarchy(processed_rows)
-    _calculate_hierarchical_masses(processed_rows)
+    build_hierarchy(processed_rows)
+    calculate_hierarchical_masses(processed_rows)
     
     # Third pass: Calculate totals and build final results
     total_weight_lb = 0.0
@@ -333,97 +255,6 @@ def process_bom_data(bom_data: dict, document_id: str = None) -> Dict[str, Any]:
     }
 
 
-def _build_hierarchy(processed_rows):
-    """Build parent-child relationships in the processed BOM data.
-    
-    Args:
-        processed_rows: List of processed part info dictionaries
-    """
-    # Create mapping for quick lookups
-    item_map = {part["item"]: part for part in processed_rows}
-    
-    # Build parent-child relationships based on indent levels
-    for i, part in enumerate(processed_rows):
-        current_level = part["indentLevel"]
-        
-        # Find parent (previous item with lower indent level)
-        parent = None
-        for j in range(i - 1, -1, -1):
-            prev_part = processed_rows[j]
-            if prev_part["indentLevel"] < current_level:
-                parent = prev_part
-                break
-        
-        if parent:
-            part["parentId"] = parent["item"]
-            parent["children"].append(part["item"])
-            parent["hasChildren"] = True
-            
-            # Update parent to be marked as subassembly if it has children
-            if not parent["isSubassembly"]:
-                parent["isSubassembly"] = True
-
-
-def _calculate_hierarchical_masses(processed_rows):
-    """Calculate masses for subassemblies based on their components.
-    
-    Args:
-        processed_rows: List of processed part info dictionaries with hierarchy
-    """
-    # Create mapping for quick lookups
-    item_map = {part["item"]: part for part in processed_rows}
-    
-    # Process from deepest level up (bottom-up calculation)
-    max_level = max((part["indentLevel"] for part in processed_rows), default=0)
-    
-    for level in range(max_level, -1, -1):
-        for part in processed_rows:
-            if part["indentLevel"] == level and part["isSubassembly"]:
-                _calculate_subassembly_mass(part, item_map)
-
-
-def _calculate_subassembly_mass(subassembly, item_map):
-    """Calculate total mass for a subassembly from its children.
-    
-    Args:
-        subassembly: Subassembly part info dictionary
-        item_map: Dictionary mapping item IDs to part info
-    """
-    total_mass = 0.0
-    has_missing_mass = False
-    has_any_mass = False
-    
-    # Calculate mass from direct children
-    for child_id in subassembly["children"]:
-        if child_id in item_map:
-            child = item_map[child_id]
-            
-            # Use calculated mass for child subassemblies, direct mass for parts
-            child_mass = child.get("calculatedMass") or child.get("directMass")
-            
-            if child_mass is not None:
-                total_mass += child_mass * child["quantity"]
-                has_any_mass = True
-            else:
-                has_missing_mass = True
-            
-            # Propagate missing mass flag from children (only for weight/mass issues, not material)
-            if child.get("hasChildrenMissingMass"):
-                has_missing_mass = True
-    
-    # Set calculated mass for subassembly
-    if has_any_mass:
-        subassembly["calculatedMass"] = total_mass
-        # Update the displayed mass_lb field to show calculated mass
-        subassembly["mass_lb"] = total_mass
-        subassembly["weight"] = total_mass
-    
-    # Update missing mass flags
-    subassembly["hasChildrenMissingMass"] = has_missing_mass
-    
-    # If subassembly has no direct material but has calculated mass, it may still be missing material
-    if not has_material(subassembly["material"]) and subassembly.get("calculatedMass"):
-        subassembly["missingMaterial"] = True
 
 
 def fetch_and_process_bom(

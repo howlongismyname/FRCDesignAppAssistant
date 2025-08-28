@@ -223,7 +223,7 @@ class BomResponseBuilder:
                 name=part.name,
                 quantity=part.quantity,
                 mass_lb=part.mass.to_pounds() if part.mass else None,
-                material=part.material.display_name,
+                material=part.material.display_name if part.material else None,
                 missing_material=part.is_missing_material,
                 missing_mass=part.is_missing_mass,
                 parent_id=part.parent_id,
@@ -257,7 +257,7 @@ class BomResponseBuilder:
         # Calculate cache age
         cache_age_hours = None
         if bom.last_updated:
-            age_delta = datetime.now() - bom.last_updated
+            age_delta = datetime.utcnow() - bom.last_updated
             cache_age_hours = age_delta.total_seconds() / 3600
         
         return BomResponseDto(
@@ -292,7 +292,7 @@ class WeightMetricsBuilder:
                 total_weight += part_weight
                 parts_with_mass += 1
                 
-                if group_by_material and part.material.display_name:
+                if group_by_material and part.material and part.material.display_name:
                     material = part.material.display_name
                     weight_by_material[material] = weight_by_material.get(material, Decimal("0")) + part_weight
                 
@@ -341,7 +341,7 @@ class MissingDataReportBuilder:
                     "item_id": part.item_id,
                     "name": part.name,
                     "quantity": str(part.quantity),
-                    "current_material": part.material.display_name or "None"
+                    "current_material": part.material.display_name if part.material else "None"
                 })
                 
                 # Suggest material based on classification if available
@@ -353,7 +353,7 @@ class MissingDataReportBuilder:
                     "item_id": part.item_id,
                     "name": part.name,
                     "quantity": str(part.quantity),
-                    "material": part.material.display_name or "Unknown"
+                    "material": part.material.display_name if part.material else "Unknown"
                 })
         
         # Generate recommendations

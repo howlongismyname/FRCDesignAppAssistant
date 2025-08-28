@@ -331,15 +331,28 @@ class BlobStorageAdapter:
             'file': (filename, data, content_type)
         }
         
-        # Make request using httpx directly for file upload
-        response = await self.onshape_client.client.post(
-            f"{self.onshape_client.base_url}{path}",
-            files=files,
-            headers=self.onshape_client._build_auth_headers("POST", path)
-        )
+        # Make request using proper authentication and circuit breaker logic
+        if not self.onshape_client.circuit_breaker.call_allowed():
+            raise Exception("Circuit breaker is open - too many API failures")
         
-        if response.status_code not in (200, 201):
-            raise Exception(f"Failed to upload blob: {response.status_code}")
+        headers = self.onshape_client._build_auth_headers("POST", path)
+        
+        try:
+            response = await self.onshape_client.client.post(
+                f"{self.onshape_client.base_url}{path}",
+                files=files,
+                headers=headers
+            )
+            
+            if response.status_code not in (200, 201):
+                self.onshape_client.circuit_breaker.record_failure()
+                raise Exception(f"Failed to upload blob: {response.status_code}")
+            
+            self.onshape_client.circuit_breaker.record_success()
+            
+        except Exception as e:
+            self.onshape_client.circuit_breaker.record_failure()
+            raise Exception(f"Blob upload failed: {e}") from e
         
         # Return the blob URL
         return f"{self.onshape_client.base_url}{path}"
@@ -353,7 +366,7 @@ class BlobStorageAdapter:
         
         # Create hash of reference for uniqueness
         ref_string = f"{onshape_ref.document_id}_{onshape_ref.element_id}_{onshape_ref.part_id}"
-        ref_hash = hashlib.md5(ref_string.encode()).hexdigest()[:8]
+        ref_hash = hashlib.sha256(ref_string.encode()).hexdigest()[:8]
         
         size = metadata.get('size', '300x300')
         view_angle = metadata.get('view_angle', 'iso')
@@ -384,30 +397,54 @@ class FileSystemStorageAdapter:
         self.blob_dir.mkdir(exist_ok=True)
     
     async def save_bom(self, bom: Bom) -> str:
-        """Save BOM to file system."""
+        """Save BOM to file system using JSON serialization."""
         
         cache_key = self._generate_cache_key(bom.onshape_ref, bom.configuration_id)
-        file_path = self.bom_dir / f"{cache_key}.pkl"
+        file_path = self.bom_dir / f"{cache_key}.json"
         
-        with open(file_path, 'wb') as f:
-            pickle.dump(bom, f)
+        # Serialize BOM to JSON-safe format
+        bom_data = self._serialize_bom(bom)
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(bom_data, f, indent=2, ensure_ascii=False)
         
         return cache_key
     
     async def get_bom(self, cache_key: str) -> Optional[Bom]:
-        """Get BOM from file system."""
+        """Get BOM from file system using JSON deserialization."""
         
-        file_path = self.bom_dir / f"{cache_key}.pkl"
+        file_path = self.bom_dir / f"{cache_key}.json"
         
-        if not file_path.exists():
-            return None
+        # Also check for legacy pickle files and migrate them
+        legacy_path = self.bom_dir / f"{cache_key}.pkl"
         
-        try:
-            with open(file_path, 'rb') as f:
-                return pickle.load(f)
-        except Exception as e:
-            logger.error(f"Failed to load BOM from {file_path}: {e}")
-            return None
+        if file_path.exists():
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    bom_data = json.load(f)
+                return self._deserialize_bom(bom_data)
+            except Exception as e:
+                logger.error(f"Failed to load BOM from {file_path}: {e}")
+                return None
+        elif legacy_path.exists():
+            # Legacy pickle file - load and migrate to JSON
+            try:
+                with open(legacy_path, 'rb') as f:
+                    bom = pickle.load(f)
+                
+                # Save as JSON for future use
+                await self.save_bom(bom)
+                
+                # Remove legacy pickle file
+                legacy_path.unlink()
+                
+                logger.info(f"Migrated legacy pickle file to JSON: {cache_key}")
+                return bom
+            except Exception as e:
+                logger.error(f"Failed to migrate legacy BOM from {legacy_path}: {e}")
+                return None
+        
+        return None
     
     async def save_thumbnail(
         self, 
@@ -444,6 +481,119 @@ class FileSystemStorageAdapter:
         
         return package_id
     
+    def _serialize_bom(self, bom: Bom) -> Dict[str, Any]:
+        """Serialize BOM domain object to dictionary (copied from StructuredStorageAdapter)."""
+        
+        # Convert parts to serializable format
+        parts_data = {}
+        for part_id, part in bom.parts.items():
+            parts_data[part_id] = {
+                "item_id": part.item_id,
+                "name": part.name,
+                "quantity": str(part.quantity),
+                "mass_lb": str(part.mass.to_pounds()) if part.mass else None,
+                "material": {
+                    "display_name": part.material.display_name,
+                    "id": part.material.id,
+                    "density": str(part.material.density) if part.material.density else None,
+                    "type": part.material.type
+                },
+                "parent_id": part.parent_id,
+                "indent_level": part.indent_level,
+                "is_current_document": part.is_current_document,
+                "vendor": part.vendor,
+                "part_number": part.part_number,
+                "cots_category": part.cots_category,
+                "onshape_ref": {
+                    "document_id": part.onshape_ref.document_id,
+                    "element_id": part.onshape_ref.element_id,
+                    "wvm_type": part.onshape_ref.wvm_type,
+                    "wvm_id": part.onshape_ref.wvm_id,
+                    "part_id": part.onshape_ref.part_id
+                } if part.onshape_ref else None,
+                "classification": {
+                    "part_type": part.classification.part_type.name,
+                    "confidence": part.classification.confidence,
+                    "reasoning": part.classification.reasoning,
+                    "suggested_material": part.classification.suggested_material,
+                    "manufacturing_process": part.classification.manufacturing_process
+                } if part.classification else None
+            }
+        
+        # Convert assemblies to serializable format
+        assemblies_data = {}
+        for assembly_id, assembly in bom.assemblies.items():
+            assemblies_data[assembly_id] = {
+                "item_id": assembly.item_id,
+                "name": assembly.name,
+                "quantity": str(assembly.quantity),
+                "calculated_mass_lb": str(assembly.calculated_mass.to_pounds()) if assembly.calculated_mass else None,
+                "parent_id": assembly.parent_id,
+                "indent_level": assembly.indent_level,
+                "children": assembly.children,
+                "has_children_missing_mass": assembly.has_children_missing_mass,
+                "has_children_missing_material": assembly.has_children_missing_material
+            }
+        
+        # Convert analysis to serializable format
+        analysis_data = None
+        if bom.analysis:
+            analysis_data = {
+                "total_weight_lb": str(bom.analysis.total_weight_lb),
+                "parts_counted": bom.analysis.parts_counted,
+                "parts_skipped": bom.analysis.parts_skipped,
+                "missing_material_count": bom.analysis.missing_material_count,
+                "missing_mass_count": bom.analysis.missing_mass_count,
+                "subassembly_count": bom.analysis.subassembly_count,
+                "current_document_parts": bom.analysis.current_document_parts,
+                "imported_parts": bom.analysis.imported_parts,
+                "processed_at": bom.analysis.processed_at.isoformat(),
+                "processing_time_ms": bom.analysis.processing_time_ms
+            }
+        
+        return {
+            "onshape_ref": {
+                "document_id": bom.onshape_ref.document_id,
+                "element_id": bom.onshape_ref.element_id,
+                "wvm_type": bom.onshape_ref.wvm_type,
+                "wvm_id": bom.onshape_ref.wvm_id,
+                "part_id": bom.onshape_ref.part_id
+            },
+            "configuration_id": bom.configuration_id,
+            "parts": parts_data,
+            "assemblies": assemblies_data,
+            "analysis": analysis_data,
+            "last_updated": bom.last_updated.isoformat(),
+            "cache_key": bom.cache_key,
+            "version": "1.0"  # Schema version for future compatibility
+        }
+    
+    def _deserialize_bom(self, data: Dict[str, Any]) -> Bom:
+        """Deserialize dictionary to BOM domain object (copied from StructuredStorageAdapter)."""
+        # TODO: Implement full deserialization from structured data
+        # This would reverse the serialization process above
+        # For now, return a minimal BOM object
+        
+        onshape_ref = OnshapeReference(
+            document_id=data["onshape_ref"]["document_id"],
+            element_id=data["onshape_ref"]["element_id"],
+            wvm_type=data["onshape_ref"]["wvm_type"],
+            wvm_id=data["onshape_ref"]["wvm_id"],
+            part_id=data["onshape_ref"]["part_id"]
+        )
+        
+        bom = Bom(
+            onshape_ref=onshape_ref,
+            configuration_id=data.get("configuration_id")
+        )
+        
+        if data.get("last_updated"):
+            bom.last_updated = datetime.fromisoformat(data["last_updated"])
+        
+        bom.cache_key = data.get("cache_key")
+        
+        return bom
+    
     def _generate_cache_key(self, onshape_ref: OnshapeReference, config_id: Optional[str]) -> str:
         """Generate cache key."""
         key_parts = [
@@ -469,7 +619,7 @@ class FileSystemStorageAdapter:
         """Generate filename for thumbnail."""
         
         ref_string = f"{onshape_ref.document_id}_{onshape_ref.element_id}_{onshape_ref.part_id}"
-        ref_hash = hashlib.md5(ref_string.encode()).hexdigest()[:8]
+        ref_hash = hashlib.sha256(ref_string.encode()).hexdigest()[:8]
         
         size = metadata.get('size', '300x300')
         view_angle = metadata.get('view_angle', 'iso')

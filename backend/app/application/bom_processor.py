@@ -32,9 +32,10 @@ class BomProcessor:
     ) -> Bom:
         """Process raw BOM data from Onshape API into a Bom domain object."""
         
-        logger.info("Processing BOM data", 
-                   document_id=onshape_ref.document_id,
-                   element_id=onshape_ref.element_id)
+        logger.info("Processing BOM data", extra={
+                   "document_id": onshape_ref.document_id,
+                   "element_id": onshape_ref.element_id
+                   })
         
         # Create BOM aggregate
         bom = Bom(
@@ -68,10 +69,11 @@ class BomProcessor:
         # Perform analysis
         bom.analyze()
         
-        logger.info("BOM processing completed",
-                   parts_count=len(bom.parts),
-                   assemblies_count=len(bom.assemblies),
-                   total_weight_lb=float(bom.analysis.total_weight_lb) if bom.analysis else 0)
+        logger.info("BOM processing completed", extra={
+                   "parts_count": len(bom.parts),
+                   "assemblies_count": len(bom.assemblies),
+                   "total_weight_lb": float(bom.analysis.total_weight_lb) if bom.analysis else 0
+                   })
         
         return bom
     
@@ -86,7 +88,7 @@ class BomProcessor:
         elif isinstance(bom_data, list):
             return bom_data
         else:
-            logger.warning("Unexpected BOM data format", keys=list(bom_data.keys()))
+            logger.warning("Unexpected BOM data format", extra={"keys": list(bom_data.keys())})
             return []
     
     async def _process_bom_item(

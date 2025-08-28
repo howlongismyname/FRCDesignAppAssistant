@@ -6,6 +6,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 import httpx
 from decimal import Decimal
+from urllib.parse import urlparse
 
 from ..domain.bom import OnshapeReference
 from ..domain.errors import OnshapeApiError, RateLimitError, AuthenticationError
@@ -61,7 +62,8 @@ class OnshapeClientAdapter:
         secret_key: str = "",
         timeout: int = 30,
         max_retries: int = 3,
-        retry_delay: float = 1.0
+        retry_delay: float = 1.0,
+        max_retry_delay: float = 60.0
     ):
         self.base_url = base_url.rstrip("/")
         self.access_key = access_key
@@ -69,6 +71,7 @@ class OnshapeClientAdapter:
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.max_retry_delay = max_retry_delay
         
         # Circuit breaker for resilience
         self.circuit_breaker = CircuitBreaker()
@@ -97,7 +100,7 @@ class OnshapeClientAdapter:
         """Fetch BOM data from Onshape API."""
         
         # Build API path
-        path = f"/api/v9/assemblies/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/bom"
+        path = f"/api/v6/assemblies/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/bom"
         
         params = {}
         if configuration_id:
@@ -119,10 +122,10 @@ class OnshapeClientAdapter:
         
         # For parts, we need to use the parts API endpoint
         if onshape_ref.part_id:
-            path = f"/api/v9/parts/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/partid/{onshape_ref.part_id}/massproperties"
+            path = f"/api/v6/parts/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/partid/{onshape_ref.part_id}/massproperties"
         else:
             # For assemblies, use assembly mass properties
-            path = f"/api/v9/assemblies/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/massproperties"
+            path = f"/api/v6/assemblies/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/massproperties"
         
         try:
             response = await self._make_request("GET", path)
@@ -143,7 +146,7 @@ class OnshapeClientAdapter:
         if not onshape_ref.part_id:
             raise OnshapeApiError("Part ID required for thumbnail generation")
         
-        path = f"/api/v9/thumbnails/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/partid/{onshape_ref.part_id}"
+        path = f"/api/v6/thumbnails/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/partid/{onshape_ref.part_id}"
         
         params = {
             "sz": size,
@@ -180,7 +183,7 @@ class OnshapeClientAdapter:
         if not onshape_ref.part_id:
             raise OnshapeApiError("Part ID required for metadata update")
         
-        path = f"/api/v9/metadata/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/p/{onshape_ref.part_id}"
+        path = f"/api/v6/metadata/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/p/{onshape_ref.part_id}"
         
         # Onshape metadata format
         payload = {
@@ -246,14 +249,14 @@ class OnshapeClientAdapter:
         # Determine if this is a part studio or assembly export
         if onshape_ref.part_id:
             # Part studio export
-            path = f"/api/v9/partstudios/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/export"
+            path = f"/api/v6/partstudios/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/export"
             payload = {
                 "format": api_format,
                 "partIds": [onshape_ref.part_id]
             }
         else:
             # Assembly export
-            path = f"/api/v9/assemblies/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/export"
+            path = f"/api/v6/assemblies/d/{onshape_ref.document_id}/{onshape_ref.wvm_type}/{onshape_ref.wvm_id}/e/{onshape_ref.element_id}/export"
             payload = {
                 "format": api_format
             }
@@ -266,6 +269,18 @@ class OnshapeClientAdapter:
         if "href" in export_data:
             # Direct download link
             download_url = export_data["href"]
+            
+            # Validate download URL for security
+            parsed_url = urlparse(download_url)
+            if parsed_url.scheme != 'https':
+                raise OnshapeApiError("Download URL must use HTTPS")
+            
+            # Ensure hostname matches expected Onshape domains
+            allowed_domains = ['cad.onshape.com', 'onshape.com', 'onshape-public.s3.amazonaws.com']
+            if not any(parsed_url.hostname.endswith(domain) for domain in allowed_domains if parsed_url.hostname):
+                logger.error(f"Blocked download from untrusted domain: {parsed_url.hostname}")
+                raise OnshapeApiError(f"Download from untrusted domain blocked: {parsed_url.hostname}")
+            
             file_response = await self._make_request("GET", download_url, use_auth=False)
             
             return {
@@ -333,7 +348,7 @@ class OnshapeClientAdapter:
                 elif response.status_code >= 500:
                     # Server error - might be transient
                     if attempt < self.max_retries:
-                        wait_time = self.retry_delay * (2 ** attempt)  # Exponential backoff
+                        wait_time = min(self.retry_delay * (2 ** attempt), self.max_retry_delay)  # Capped exponential backoff
                         logger.warning(f"Server error {response.status_code}, retrying in {wait_time}s")
                         await asyncio.sleep(wait_time)
                         continue
@@ -351,7 +366,7 @@ class OnshapeClientAdapter:
             except httpx.RequestError as e:
                 last_exception = e
                 if attempt < self.max_retries:
-                    wait_time = self.retry_delay * (2 ** attempt)
+                    wait_time = min(self.retry_delay * (2 ** attempt), self.max_retry_delay)
                     logger.warning(f"Request failed, retrying in {wait_time}s: {e}")
                     await asyncio.sleep(wait_time)
                     continue
